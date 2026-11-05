@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'./tests/e2e',fullyParallel:false,workers:1,timeout:60000,use:{baseURL:'http://localhost:5183',headless:true,screenshot:'only-on-failure'},webServer:[{command:'npm run dev -w backend',url:'http://localhost:4000/api/config',reuseExistingServer:true},{command:'npm run dev -w apps/customer-pwa',url:'http://localhost:5183',reuseExistingServer:true},{command:'npm run dev -w apps/partner-pwa',url:'http://localhost:5184',reuseExistingServer:true}]});

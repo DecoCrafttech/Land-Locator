@@ -1,0 +1,23 @@
+import {beforeAll,it,expect} from 'vitest';
+import request from 'supertest';
+import {app} from '../backend/src/app';
+import {initStore,getProperty} from '../backend/src/store';
+import {demoProperties} from '../backend/src/seed';
+const boundary=[{lat:11.026,lng:77.008},{lat:11.026,lng:77.0083},{lat:11.0262,lng:77.0083},{lat:11.0262,lng:77.008}];
+let cookie:string,csrf:string;
+beforeAll(async()=>{await initStore();const r=await request(app).post('/api/auth/login').send({email:'partner@demo.landlocator.test',password:'LandLocator!2026'});cookie=r.headers['set-cookie'][0].split(';')[0];csrf=r.body.csrf;});
+it('persists, publishes, protects and removes the agent boundary',async()=>{
+  const create=await request(app).post('/api/partner/properties').set('Cookie',cookie).set('X-CSRF-Token',csrf).send({...demoProperties[0],title:'Boundary persistence fixture',boundary});
+  expect(create.status).toBe(201);const id=create.body.id;
+  expect((await getProperty(id))?.boundary).toEqual(boundary);
+  const publicView=await request(app).get(`/api/properties/${id}`);expect(publicView.body.boundary).toEqual(boundary);
+  const patch=(body:object)=>request(app).patch(`/api/partner/properties/${id}`).set('Cookie',cookie).set('X-CSRF-Token',csrf).send(body);
+  const edited=boundary.map((p,i)=>i===1?{...p,lng:p.lng+.0001}:p);
+  expect((await patch({boundary:edited})).status).toBe(200);
+  expect((await request(app).get(`/api/properties/${id}`)).body.boundary).toEqual(edited);
+  expect((await patch({boundary:boundary.slice(0,2)})).status).toBe(400);
+  await patch({exactLocation:false});expect((await request(app).get(`/api/properties/${id}`)).body.boundary).toEqual([]);
+  expect((await getProperty(id))?.boundary).toEqual(edited);
+  await patch({boundary:[],exactLocation:true});expect((await getProperty(id))?.boundary).toEqual([]);
+  expect((await request(app).get(`/api/properties/${id}`)).body.boundary).toEqual([]);
+});

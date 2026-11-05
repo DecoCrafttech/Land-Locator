@@ -1,0 +1,53 @@
+import {test,expect} from '@playwright/test';
+
+test('agent draws and drags corners, saves the shape, and customer sees the same boundary',async({page})=>{
+  await page.setViewportSize({width:390,height:900});
+  await page.goto('http://localhost:5184');
+  await page.getByRole('button',{name:'Use demo partner credentials',exact:true}).click();
+  await page.getByRole('button',{name:'Sign in to your studio'}).click();
+  await expect(page.getByRole('heading',{name:'Room for good things.'})).toBeVisible();
+  const me=await (await page.request.get('/api/auth/me')).json();
+  const source=await (await page.request.get('/api/properties/LL-1001')).json();
+  const response=await page.request.post('/api/partner/properties',{headers:{'X-CSRF-Token':me.csrf},data:{...source,title:'Boundary workflow plot',boundary:[],status:'Available',exactLocation:true}});
+  expect(response.status()).toBe(201);const property=await response.json();
+  try{
+    await page.goto(`http://localhost:5184/edit/${property.id}`);
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await expect(page.getByText('No boundary marked.',{exact:false})).toBeVisible();
+    await page.getByRole('button',{name:'Draw boundary',exact:true}).click();
+    const canvas=page.locator('.boundary-editor-map .map-canvas');
+    await canvas.scrollIntoViewIfNeeded();await page.waitForTimeout(700);
+    const box=(await canvas.boundingBox())!;
+    const corners=[[.24,.3],[.58,.3],[.58,.62],[.24,.62]];
+    for(const [x,y] of corners)await canvas.click({position:{x:box.width*x,y:box.height*y}});
+    await expect(page.locator('.boundary-corner')).toHaveCount(4);
+    const before=await page.getByTestId('measured-boundary-area').innerText();
+    const handle=page.getByTitle('Boundary corner 2',{exact:true});
+    const pos=(await handle.boundingBox())!;
+    await page.mouse.move(pos.x+pos.width/2,pos.y+pos.height/2);await page.mouse.down();await page.mouse.move(pos.x+pos.width/2+25,pos.y+pos.height/2-12,{steps:8});await page.mouse.up();
+    await expect(page.getByTestId('measured-boundary-area')).not.toHaveText(before);
+    await expect(page.getByTestId('boundary-difference')).toBeVisible();
+    await page.getByRole('button',{name:'Finish drawing',exact:true}).click();
+    await expect(page.locator('.boundary-corner')).toHaveCount(0);
+    await page.getByRole('button',{name:'Adjust corners',exact:true}).click();
+    await expect(page.locator('.boundary-corner')).toHaveCount(4);
+    await page.getByRole('button',{name:'Done adjusting',exact:true}).click();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('button',{name:'Publish property',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Your property is published.'})).toBeVisible();
+    const saved=await (await page.request.get(`/api/properties/${property.id}`)).json();expect(saved.boundary).toHaveLength(4);expect(saved.area).toBe(source.area);
+    await page.goto(`http://localhost:5183/property/${property.id}`);
+    await expect(page.getByText('Approx. map area',{exact:true})).toBeVisible();
+    await expect(page.locator('.embedded-map .boundary-map-label')).toContainText('declared');
+    await expect(page.locator('.embedded-map path[fill="#512da8"]')).toHaveCount(1);
+    await expect(page.locator('.embedded-map .boundary-corner')).toHaveCount(0);
+    await page.goto(`http://localhost:5184/edit/${property.id}`);
+    await page.getByRole('button',{name:'Continue',exact:true}).click();
+    await page.getByRole('button',{name:'Remove boundary',exact:true}).click();
+    await expect(page.getByText('No boundary marked.',{exact:false})).toBeVisible();
+    await page.getByRole('button',{name:'Save draft',exact:true}).click();
+    await expect(page.getByRole('heading',{name:'Saved for when you’re ready.'})).toBeVisible();
+    const all=await (await page.request.get('/api/partner/properties')).json();expect(all.find((p:any)=>p.id===property.id).boundary).toEqual([]);
+  }finally{await page.request.delete(`/api/partner/properties/${property.id}`,{headers:{'X-CSRF-Token':me.csrf}});}
+});
